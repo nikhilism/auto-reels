@@ -1,0 +1,44 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  AUTO REELS — USER SETTINGS
+#  Edit this file to control what gets generated.
+#  Then run:  run.bat   (or python main.py)
+#  Changes here override the random topic selection in config.yaml.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── TOPIC OVERRIDE ────────────────────────────────────────────────────────────
+# Set a specific topic for a channel instead of the random one from config.yaml.
+# Leave blank to use a random topic from the channel's topic list.
+#
+# Examples:
+#   gaming_topic = GTA 5 top 5 most wanted secrets
+#   drawing_topic = how to draw realistic eyes step by step
+#   informative_topic = why do we dream? the science explained
+
+gaming_topic =
+drawing_topic =
+informative_topic =
+
+
+# ── CHANNEL SELECTION ─────────────────────────────────────────────────────────
+# Which channels to run. Set to yes or no.
+
+run_gaming     = yes
+run_drawing    = yes
+run_informative = yes
+
+
+# ── VIDEO STYLE ───────────────────────────────────────────────────────────────
+# Caption highlight color (one of: gold, red, cyan, green, white, purple)
+# Or use a hex code like: #FF4500
+
+gaming_highlight     = red
+drawing_highlight    = gold
+informative_highlight = cyan
+
+
+# ── UPLOAD SETTINGS ───────────────────────────────────────────────────────────
+# Set to yes to auto-upload after generating (requires YouTube API setup)
+
+gaming_auto_upload      = no
+drawing_auto_upload     = no
+informative_auto_upload = no

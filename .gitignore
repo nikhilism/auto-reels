@@ -1,0 +1,44 @@
+# Git ignore file for Auto Reels Project
+
+# ── Secrets ──────────────────────────────────
+.env
+client_secrets.json
+*.token.json
+token.pickle
+.youtube_token.pickle
+
+# ── Logs ─────────────────────────────────────
+auto_reels.log
+*.log
+
+# ── Fonts (download via setup.py) ────────────
+assets/fonts/*.ttf
+assets/fonts/*.otf
+
+# ── Python ───────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+*.so
+venv/
+env/
+.venv/
+
+# ── Output videos (large files) ──────────────
+output/
+temp/
+
+# ── Whisper model cache ───────────────────────
+*.pt
+
+# ── OS ───────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini

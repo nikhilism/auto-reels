@@ -1,0 +1,123 @@
+# ─────────────────────────────────────────────────────────────
+#  Auto Reels Project — Channel Configuration
+#  Edit this file to customize each channel's behavior.
+#  API keys go in .env — NOT here.
+# ─────────────────────────────────────────────────────────────
+
+channels:
+
+  drawing:
+    enabled: true
+    name: "Drawing Channel"
+    niche: "drawing and art"
+    topics:
+      - "beginner drawing tips"
+      - "art history facts"
+      - "pencil shading techniques"
+      - "color theory basics"
+      - "famous painting secrets"
+      - "sketchbook challenges"
+    tone: "friendly, encouraging, educational"
+    tts_voice: "en-US-AriaNeural"
+    tts_rate: "+5%"        # Speed: use +/- percentage
+    tts_pitch: "+0Hz"
+    pexels_keywords:
+      - "drawing"
+      - "painting"
+      - "art studio"
+      - "sketchbook"
+      - "watercolor"
+      - "colorful art"
+    caption_style:
+      font_size: 72
+      font_color: "#FFFFFF"
+      highlight_color: "#FFD700"  # Gold highlight on current word
+      stroke_color: "#000000"
+      stroke_width: 3
+      position: "center"          # center | bottom
+      max_words_per_line: 3
+    output_dir: "output/drawing"
+    auto_upload: false            # Set to true to enable YouTube auto-upload
+
+  gaming:
+    enabled: true
+    name: "Gaming Channel"
+    niche: "gaming tips, facts, and news"
+    topics:
+      - "GTA 5 hidden secrets"
+      - "Forza Horizon 6 best cars"
+      - "GTA 5 money making tips"
+      - "Forza Horizon 6 tips for beginners"
+      - "top 5 gaming facts"
+      - "GTA 5 easter eggs"
+      - "Forza Horizon 6 fastest cars"
+      - "gaming world records"
+    tone: "energetic, exciting, hype, casual"
+    tts_voice: "en-US-GuyNeural"
+    tts_rate: "+15%"
+    tts_pitch: "+0Hz"
+    pexels_keywords:
+      - "racing car"
+      - "city at night"
+      - "car drifting"
+      - "street racing"
+      - "neon city"
+      - "gaming setup"
+    caption_style:
+      font_size: 80
+      font_color: "#FFFFFF"
+      highlight_color: "#FF4500"  # Orange-red highlight
+      stroke_color: "#000000"
+      stroke_width: 4
+      position: "center"
+      max_words_per_line: 3
+    output_dir: "output/gaming"
+    auto_upload: false
+
+  informative:
+    enabled: true
+    name: "Informative Channel"
+    niche: "mind-blowing facts, science, history, and how things work"
+    topics:
+      - "mind-blowing science facts"
+      - "history facts you didn't know"
+      - "how everyday things work"
+      - "space and universe facts"
+      - "psychology facts"
+      - "animal kingdom facts"
+      - "ancient civilization secrets"
+      - "technology breakthroughs"
+    tone: "authoritative, clear, surprising, educational"
+    tts_voice: "en-US-JennyNeural"
+    tts_rate: "+8%"
+    tts_pitch: "+0Hz"
+    pexels_keywords:
+      - "space galaxy"
+      - "science laboratory"
+      - "nature landscape"
+      - "ancient ruins"
+      - "technology future"
+      - "ocean underwater"
+    caption_style:
+      font_size: 76
+      font_color: "#FFFFFF"
+      highlight_color: "#00CFFF"  # Cyan highlight
+      stroke_color: "#000000"
+      stroke_width: 3
+      position: "center"
+      max_words_per_line: 3
+    output_dir: "output/informative"
+    auto_upload: false
+
+# ─────────────────────────────────────────────────────────────
+#  Global Settings
+# ─────────────────────────────────────────────────────────────
+global:
+  video_width: 1080
+  video_height: 1920       # 9:16 vertical for Shorts/Reels
+  target_duration_secs: 55 # Aim for ~55 second videos
+  whisper_model: "base"    # Options: tiny, base, small, medium, large-v2
+                           # base = good balance of speed and accuracy (via faster-whisper)
+  temp_dir: "temp"
+  font_path: "assets/fonts/Montserrat-Bold.ttf"
+  watermark: false         # Set to true to add channel watermark
