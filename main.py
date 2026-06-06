@@ -83,6 +83,22 @@ def make_output_path(channel_cfg: dict, title: str) -> str:
     return f"{out_dir}/{ts}_{safe_title}.mp4"
 
 
+def _find_own_clips(folder: str) -> list[str]:
+    """
+    Find all processed video clips in a folder (from clip_studio.py output).
+    Returns sorted list of .mp4 paths, empty list if folder doesn't exist or is empty.
+    """
+    if not os.path.exists(folder):
+        return []
+    exts = {".mp4", ".mov", ".avi", ".mkv"}
+    clips = [
+        os.path.join(folder, f)
+        for f in sorted(os.listdir(folder))
+        if os.path.splitext(f)[1].lower() in exts
+    ]
+    return clips
+
+
 def run_channel(
     channel_id: str,
     channel_cfg: dict,
@@ -135,16 +151,35 @@ def run_channel(
         pitch=channel_cfg.get("tts_pitch", "+0Hz"),
     )
 
-    # ── Step 3: Fetch Background Clips (3-4 distinct clips) ────────────────────
-    logger.info("Step 3/6 -- Fetching background clips (Pexels)...")
-    all_queries = script_data["pexels_queries"] + channel_cfg.get("pexels_keywords", [])
-    clip_paths = fetch_multiple_clips(
-        queries=all_queries,
-        output_dir=temp["clips_dir"],
-        count=4,
-        min_duration=12,
-    )
-    logger.info(f"Fetched {len(clip_paths)} background clips.")
+    # ── Step 3: Get Background Clips ─────────────────────────────────────────
+    # Priority: processed_clips/<channel>/ (your own clips) → Pexels (fallback)
+    processed_clips_dir = f"processed_clips/{channel_id}"
+    own_clips = _find_own_clips(processed_clips_dir)
+
+    if own_clips:
+        logger.info(
+            f"Step 3/6 -- Using YOUR clips from {processed_clips_dir}/ "
+            f"({len(own_clips)} available)"
+        )
+        # Pick 4 clips, cycling through available ones
+        import random
+        clip_paths = (own_clips * 4)[:4]
+        random.shuffle(clip_paths)
+        logger.info(f"Selected: {[os.path.basename(p) for p in clip_paths]}")
+    else:
+        logger.info("Step 3/6 -- Fetching background clips (Pexels)...")
+        logger.info(
+            f"  Tip: Run 'clip_studio.py --channel {channel_id}' with your own "
+            f"clips in my_clips/{channel_id}/ to use them instead."
+        )
+        all_queries = script_data["pexels_queries"] + channel_cfg.get("pexels_keywords", [])
+        clip_paths = fetch_multiple_clips(
+            queries=all_queries,
+            output_dir=temp["clips_dir"],
+            count=4,
+            min_duration=12,
+        )
+    logger.info(f"Using {len(clip_paths)} background clip(s).")
 
     # ── Step 4: Fetch Background Music ──────────────────────────────────────
     logger.info("Step 4/6 -- Fetching background music (Jamendo/CDN)...")
