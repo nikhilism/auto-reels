@@ -4,16 +4,17 @@ video_editor.py
 Assembles the final vertical reel/short using MoviePy.
 
 Steps:
-  1. Load background video, crop to 9:16, trim to audio length.
-  2. Add a dark overlay for caption readability.
-  3. Overlay the voiceover audio.
-  4. Render animated captions with per-word highlighting.
-  5. Export the final .mp4.
+  1. Load 3-4 background clips, crop each to 9:16, distribute evenly.
+  2. Apply crossfade transitions between clips.
+  3. Add dark overlay for caption readability.
+  4. Overlay the TTS voiceover.
+  5. Mix royalty-free background music at 20% volume.
+  6. Render animated word-by-word captions.
+  7. Export final .mp4 at 1080x1920.
 """
 
 import logging
 import os
-import textwrap
 from PIL import Image, ImageDraw, ImageFont
 import numpy as np
 
@@ -25,13 +26,16 @@ from moviepy.editor import (
     VideoFileClip,
     AudioFileClip,
     CompositeVideoClip,
+    CompositeAudioClip,
     ColorClip,
     ImageClip,
+    concatenate_videoclips,
+    concatenate_audioclips,
 )
 
 logger = logging.getLogger(__name__)
 
-# ── Default settings (overridden by channel config) ───────────────────────────
+# ── Defaults (overridden by channel config) ───────────────────────────────────
 DEFAULT_W = 1080
 DEFAULT_H = 1920
 DEFAULT_FONT_SIZE = 76
@@ -41,31 +45,103 @@ DEFAULT_STROKE_COLOR = "#000000"
 DEFAULT_STROKE_WIDTH = 3
 DEFAULT_MAX_WORDS = 3
 DEFAULT_FONT_PATH = "assets/fonts/Montserrat-Bold.ttf"
+CROSSFADE_DURATION = 0.5   # seconds between clips
+MUSIC_VOLUME = 0.18        # 18% — just under 20%
 
 
 def hex_to_rgb(hex_color: str) -> tuple:
-    """Convert '#RRGGBB' to (R, G, B) tuple."""
     h = hex_color.lstrip("#")
     return tuple(int(h[i: i + 2], 16) for i in (0, 2, 4))
 
 
 def _load_font(font_path: str, size: int) -> ImageFont.FreeTypeFont:
-    """Load a TTF font, fall back to default if not found."""
     if os.path.exists(font_path):
         return ImageFont.truetype(font_path, size)
-    logger.warning(f"Font not found: {font_path}. Using PIL default font.")
+    logger.warning(f"Font not found: {font_path}. Trying system font.")
     try:
-        # Try a system font on Windows
         return ImageFont.truetype("C:/Windows/Fonts/arialbd.ttf", size)
     except Exception:
         return ImageFont.load_default()
 
 
+def _crop_to_vertical(clip: VideoFileClip, W: int, H: int) -> VideoFileClip:
+    """Resize and center-crop a clip to exact W x H (9:16)."""
+    bg_aspect = clip.w / clip.h
+    target_aspect = W / H
+
+    if bg_aspect > target_aspect:
+        clip = clip.resize(height=H)
+    else:
+        clip = clip.resize(width=W)
+
+    x_center = clip.w / 2
+    y_center = clip.h / 2
+    return clip.crop(
+        x1=x_center - W / 2,
+        y1=y_center - H / 2,
+        x2=x_center + W / 2,
+        y2=y_center + H / 2,
+    )
+
+
+def _prepare_clip(clip: VideoFileClip, target_duration: float, W: int, H: int) -> VideoFileClip:
+    """Crop to 9:16, loop if needed, trim to target_duration."""
+    clip = _crop_to_vertical(clip, W, H)
+
+    # Loop if clip is shorter than target
+    if clip.duration < target_duration + 0.5:
+        loops = int((target_duration + 1) / clip.duration) + 1
+        clip = concatenate_videoclips([clip] * loops)
+
+    return clip.subclip(0, target_duration)
+
+
+def _build_background(
+    clip_paths: list[str],
+    total_duration: float,
+    W: int,
+    H: int,
+) -> VideoFileClip:
+    """
+    Load all clips, give each an equal share of the total duration,
+    and concatenate with crossfade transitions.
+    """
+    n = len(clip_paths)
+    # Each clip gets equal time; add crossfade buffer so overlaps work
+    clip_duration = (total_duration + (n - 1) * CROSSFADE_DURATION) / n
+
+    logger.info(
+        f"Splitting {total_duration:.1f}s across {n} clips "
+        f"({clip_duration:.1f}s each, {CROSSFADE_DURATION}s crossfade)"
+    )
+
+    prepared = []
+    for i, path in enumerate(clip_paths):
+        clip = VideoFileClip(path, audio=False)
+        clip = _prepare_clip(clip, clip_duration, W, H)
+        # Add crossfade-in on all clips except the first
+        if i > 0:
+            clip = clip.crossfadein(CROSSFADE_DURATION)
+        prepared.append(clip)
+
+    if len(prepared) == 1:
+        return prepared[0]
+
+    bg = concatenate_videoclips(
+        prepared,
+        method="compose",
+        padding=-CROSSFADE_DURATION,
+    )
+
+    # Ensure exact length
+    return bg.subclip(0, min(total_duration, bg.duration))
+
+
 def _render_caption_frame(
     chunk: dict,
     current_word_idx: int,
-    width: int,
-    height: int,
+    W: int,
+    H: int,
     font_path: str,
     font_size: int,
     font_color: str,
@@ -74,45 +150,41 @@ def _render_caption_frame(
     stroke_width: int,
     max_words_per_line: int,
 ) -> np.ndarray:
-    """
-    Render a single caption frame as an RGBA numpy array.
-    The current word is highlighted; others are in font_color.
-    """
-    img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    """Render one caption frame as an RGBA numpy array with word highlighting."""
+    img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
     font = _load_font(font_path, font_size)
 
     words_in_chunk = chunk["words"]
     line_words = [w["word"] for w in words_in_chunk]
 
-    # Break into lines
     lines = []
     for i in range(0, len(line_words), max_words_per_line):
         lines.append(line_words[i: i + max_words_per_line])
 
-    # Measure total text block height
-    line_height = font_size + 16
-    total_height = line_height * len(lines)
-    start_y = (height // 2) - (total_height // 2)
+    line_height = font_size + 18
+    total_text_h = line_height * len(lines)
+
+    # Position captions in the lower-middle (80% down)
+    start_y = int(H * 0.78) - total_text_h // 2
 
     word_global_idx = 0
     for line in lines:
-        # Measure total line width for centering
         word_sizes = []
         for w in line:
             bbox = draw.textbbox((0, 0), w + " ", font=font)
             word_sizes.append((bbox[2] - bbox[0], bbox[3] - bbox[1]))
 
         total_line_w = sum(ws[0] for ws in word_sizes)
-        x = (width - total_line_w) // 2
+        x = (W - total_line_w) // 2
         y = start_y
 
         for i, w in enumerate(line):
-            is_current = word_global_idx == current_word_idx
+            is_current = (word_global_idx == current_word_idx)
             color = hex_to_rgb(highlight_color) if is_current else hex_to_rgb(font_color)
             stroke_clr = hex_to_rgb(stroke_color)
 
-            # Draw stroke (outline)
+            # Draw stroke/outline
             for dx in range(-stroke_width, stroke_width + 1):
                 for dy in range(-stroke_width, stroke_width + 1):
                     if dx != 0 or dy != 0:
@@ -131,14 +203,12 @@ def _render_caption_frame(
 def _make_caption_clips(
     caption_chunks: list[dict],
     total_duration: float,
-    width: int,
-    height: int,
+    W: int,
+    H: int,
     style: dict,
     font_path: str,
 ) -> list:
-    """
-    Build a list of MoviePy ImageClips — one per word highlight state.
-    """
+    """Build per-word ImageClips for the animated caption overlay."""
     clips = []
     font_size = style.get("font_size", DEFAULT_FONT_SIZE)
     font_color = style.get("font_color", DEFAULT_FONT_COLOR)
@@ -148,23 +218,19 @@ def _make_caption_clips(
     max_words = style.get("max_words_per_line", DEFAULT_MAX_WORDS)
 
     for chunk in caption_chunks:
-        words = chunk["words"]
-        for word_idx, word in enumerate(words):
+        for word_idx, word in enumerate(chunk["words"]):
             word_start = word["start"]
             word_end = word["end"]
             duration = word_end - word_start
-            if duration <= 0:
-                continue
 
-            # Cap to total video duration
-            if word_start >= total_duration:
-                break
+            if duration <= 0 or word_start >= total_duration:
+                continue
 
             frame = _render_caption_frame(
                 chunk=chunk,
                 current_word_idx=word_idx,
-                width=width,
-                height=height,
+                W=W,
+                H=H,
                 font_path=font_path,
                 font_size=font_size,
                 font_color=font_color,
@@ -185,112 +251,120 @@ def _make_caption_clips(
 
 
 def assemble_video(
-    background_video_path: str,
+    clip_paths: list[str],
     audio_path: str,
     caption_chunks: list[dict],
     output_path: str,
     channel_cfg: dict,
     global_cfg: dict,
+    music_path: str | None = None,
 ) -> str:
     """
-    Assemble the final reel video.
+    Assemble the final reel video from multiple background clips.
 
     Args:
-        background_video_path : Path to the background .mp4 clip.
-        audio_path            : Path to the TTS .mp3 voiceover.
-        caption_chunks        : Output of caption_generator.group_into_caption_chunks().
-        output_path           : Where to write the final .mp4.
-        channel_cfg           : Channel config dict.
-        global_cfg            : Global config dict.
+        clip_paths     : List of 3-4 background .mp4 file paths.
+        audio_path     : TTS voiceover .mp3.
+        caption_chunks : Word-timed caption chunks from caption_generator.
+        output_path    : Output .mp4 path.
+        channel_cfg    : Channel config dict.
+        global_cfg     : Global config dict.
+        music_path     : Optional background music .mp3 (mixed at 20% volume).
 
     Returns:
         Path to the rendered video.
     """
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
 
     W = global_cfg.get("video_width", DEFAULT_W)
     H = global_cfg.get("video_height", DEFAULT_H)
     font_path = global_cfg.get("font_path", DEFAULT_FONT_PATH)
     caption_style = channel_cfg.get("caption_style", {})
 
-    logger.info("Loading audio...")
-    audio = AudioFileClip(audio_path)
-    total_duration = audio.duration
-    logger.info(f"Audio duration: {total_duration:.2f}s")
+    # ── Load TTS audio ─────────────────────────────────────────────────────────
+    logger.info("Loading TTS audio...")
+    tts_audio = AudioFileClip(audio_path)
+    total_duration = tts_audio.duration
+    logger.info(f"Total duration: {total_duration:.2f}s")
 
-    logger.info("Loading and processing background video...")
-    bg = VideoFileClip(background_video_path, audio=False)
+    # ── Build background from multiple clips ───────────────────────────────────
+    logger.info(f"Building background from {len(clip_paths)} clips...")
+    bg = _build_background(clip_paths, total_duration, W, H)
 
-    # ── Crop to 9:16 ──────────────────────────────────────────────────────────
-    # Resize so that the smaller dimension fills the target, then center-crop
-    bg_aspect = bg.w / bg.h
-    target_aspect = W / H
-
-    if bg_aspect > target_aspect:
-        # Video is wider than target — scale by height
-        bg = bg.resize(height=H)
-    else:
-        # Video is taller/narrower than target — scale by width
-        bg = bg.resize(width=W)
-
-    # Center crop
-    x_center = bg.w / 2
-    y_center = bg.h / 2
-    bg = bg.crop(
-        x1=x_center - W / 2,
-        y1=y_center - H / 2,
-        x2=x_center + W / 2,
-        y2=y_center + H / 2,
+    # ── Dark overlay ───────────────────────────────────────────────────────────
+    overlay = (
+        ColorClip(size=(W, H), color=(0, 0, 0))
+        .set_opacity(0.40)
+        .set_duration(total_duration)
     )
 
-    # ── Loop or trim to audio duration ────────────────────────────────────────
-    if bg.duration < total_duration:
-        loops = int(total_duration / bg.duration) + 1
-        from moviepy.editor import concatenate_videoclips
-        bg = concatenate_videoclips([bg] * loops)
-
-    bg = bg.subclip(0, total_duration)
-
-    # ── Dark overlay for caption readability ──────────────────────────────────
-    overlay = ColorClip(size=(W, H), color=(0, 0, 0)).set_opacity(0.45)
-    overlay = overlay.set_duration(total_duration)
-
-    # ── Caption clips ─────────────────────────────────────────────────────────
+    # ── Caption clips ──────────────────────────────────────────────────────────
     logger.info("Rendering caption clips...")
     caption_clips = _make_caption_clips(
         caption_chunks=caption_chunks,
         total_duration=total_duration,
-        width=W,
-        height=H,
+        W=W,
+        H=H,
         style=caption_style,
         font_path=font_path,
     )
 
-    # ── Composite ─────────────────────────────────────────────────────────────
-    logger.info("Compositing final video...")
-    all_clips = [bg, overlay] + caption_clips
-    final = CompositeVideoClip(all_clips, size=(W, H))
-    final = final.set_audio(audio)
-    final = final.set_duration(total_duration)
+    # ── Composite video ────────────────────────────────────────────────────────
+    logger.info("Compositing video layers...")
+    all_layers = [bg, overlay] + caption_clips
+    final_video = CompositeVideoClip(all_layers, size=(W, H))
+    final_video = final_video.set_duration(total_duration)
 
-    # ── Export ────────────────────────────────────────────────────────────────
-    logger.info(f"Exporting → {output_path}")
-    final.write_videofile(
+    # ── Mix audio (TTS + background music at 20%) ──────────────────────────────
+    if music_path and os.path.exists(music_path):
+        logger.info(f"Mixing background music at {int(MUSIC_VOLUME*100)}% volume...")
+        try:
+            music = AudioFileClip(music_path).volumex(MUSIC_VOLUME)
+
+            # Loop music if shorter than video
+            if music.duration < total_duration:
+                loops = int(total_duration / music.duration) + 1
+                music = concatenate_audioclips([music] * loops)
+
+            music = music.subclip(0, total_duration)
+
+            # Fade music out in last 2 seconds
+            music = music.audio_fadeout(2.0)
+
+            # Composite TTS + music
+            final_audio = CompositeAudioClip([tts_audio, music])
+            final_video = final_video.set_audio(final_audio)
+            logger.info("Background music mixed successfully.")
+        except Exception as e:
+            logger.warning(f"Music mixing failed ({e}) — using TTS only.")
+            final_video = final_video.set_audio(tts_audio)
+    else:
+        if music_path:
+            logger.warning(f"Music file not found: {music_path} — using TTS only.")
+        final_video = final_video.set_audio(tts_audio)
+
+    # ── Export ─────────────────────────────────────────────────────────────────
+    logger.info(f"Exporting -> {output_path}")
+    os.makedirs("temp", exist_ok=True)
+    final_video.write_videofile(
         output_path,
         fps=30,
         codec="libx264",
         audio_codec="aac",
         temp_audiofile="temp/temp_audio.m4a",
         remove_temp=True,
-        logger=None,  # suppress verbose MoviePy bar
+        logger=None,
         threads=4,
     )
 
     # Cleanup
-    audio.close()
-    bg.close()
-    final.close()
+    try:
+        tts_audio.close()
+        bg.close()
+        final_video.close()
+    except Exception:
+        pass
 
     size_mb = os.path.getsize(output_path) / (1024 * 1024)
-    logger.info(f"✅ Video exported ({size_mb:.1f} MB): {output_path}")
+    logger.info(f"Video exported ({size_mb:.1f} MB): {output_path}")
     return output_path

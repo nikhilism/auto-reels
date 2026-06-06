@@ -35,9 +35,10 @@ if not hasattr(_PILImage, "ANTIALIAS"):
 sys.path.insert(0, os.path.dirname(__file__))
 from src.script_generator import generate_script
 from src.tts_generator import generate_voiceover
-from src.asset_fetcher import fetch_background_video
+from src.asset_fetcher import fetch_multiple_clips
 from src.caption_generator import get_word_timestamps, group_into_caption_chunks
 from src.video_editor import assemble_video
+from src.music_fetcher import fetch_background_music
 from src.uploader import upload_to_youtube
 from src.settings_reader import load_settings
 
@@ -64,9 +65,12 @@ def make_temp_paths(channel_id: str) -> dict:
     """Build temp file paths for a single pipeline run."""
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     base = f"temp/{channel_id}_{ts}"
+    clips_dir = f"{base}_clips"
+    os.makedirs(clips_dir, exist_ok=True)
     return {
         "audio": f"{base}_voiceover.mp3",
-        "background": f"{base}_background.mp4",
+        "clips_dir": clips_dir,
+        "music": f"{base}_music.mp3",
     }
 
 
@@ -101,7 +105,7 @@ def run_channel(
     logger.info(f"{'='*60}")
 
     # ── Step 1: Generate Script ────────────────────────────────────────────────
-    logger.info("Step 1/5 -- Generating script...")
+    logger.info("Step 1/6 -- Generating script...")
     if topic_override:
         logger.info(f"Using topic from settings.txt: '{topic_override}'")
     # Pass channel_id so script_generator can pick right fallback queries
@@ -121,8 +125,8 @@ def run_channel(
     temp = make_temp_paths(channel_id)
     os.makedirs("temp", exist_ok=True)
 
-    # ── Step 2: Generate Voiceover ─────────────────────────────────────────────
-    logger.info("Step 2/5 -- Generating voiceover (Edge TTS)...")
+    # ── Step 2: Generate Voiceover ────────────────────────────────────────────────
+    logger.info("Step 2/6 -- Generating voiceover (Edge TTS)...")
     generate_voiceover(
         script=script_data["script"],
         output_path=temp["audio"],
@@ -131,18 +135,26 @@ def run_channel(
         pitch=channel_cfg.get("tts_pitch", "+0Hz"),
     )
 
-    # ── Step 3: Fetch Background Video ────────────────────────────────────────
-    logger.info("Step 3/5 -- Fetching background video (Pexels)...")
-    # Combine channel's default keywords + Gemini's topic-specific queries
+    # ── Step 3: Fetch Background Clips (3-4 distinct clips) ────────────────────
+    logger.info("Step 3/6 -- Fetching background clips (Pexels)...")
     all_queries = script_data["pexels_queries"] + channel_cfg.get("pexels_keywords", [])
-    fetch_background_video(
+    clip_paths = fetch_multiple_clips(
         queries=all_queries,
-        output_path=temp["background"],
-        min_duration=15,
+        output_dir=temp["clips_dir"],
+        count=4,
+        min_duration=12,
+    )
+    logger.info(f"Fetched {len(clip_paths)} background clips.")
+
+    # ── Step 4: Fetch Background Music ──────────────────────────────────────
+    logger.info("Step 4/6 -- Fetching background music (Jamendo/CDN)...")
+    music_path = fetch_background_music(
+        channel_id=channel_id,
+        output_path=temp["music"],
     )
 
-    # ── Step 4: Generate Captions ─────────────────────────────────────────────
-    logger.info("Step 4/5 -- Generating captions (Whisper)...")
+    # ── Step 5: Generate Captions ────────────────────────────────────────────
+    logger.info("Step 5/6 -- Generating captions (Whisper)...")
     words = get_word_timestamps(
         audio_path=temp["audio"],
         model_size=global_cfg.get("whisper_model", "base"),
@@ -152,11 +164,11 @@ def run_channel(
         max_words=channel_cfg.get("caption_style", {}).get("max_words_per_line", 3),
     )
 
-    # ── Step 5: Assemble Video ────────────────────────────────────────────────
-    logger.info("Step 5/5 -- Assembling final video (MoviePy)...")
+    # ── Step 6: Assemble Video ────────────────────────────────────────────────
+    logger.info("Step 6/6 -- Assembling final video (MoviePy)...")
     output_path = make_output_path(channel_cfg, script_data["title"])
     assemble_video(
-        background_video_path=temp["background"],
+        clip_paths=clip_paths,
         audio_path=temp["audio"],
         caption_chunks=caption_chunks,
         output_path=output_path,
